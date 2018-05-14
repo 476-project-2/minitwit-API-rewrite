@@ -10,7 +10,7 @@ from sqlite3 import dbapi2 as sqlite3
 from flask import Flask, request, session,_app_ctx_stack, jsonify
 from werkzeug import check_password_hash, generate_password_hash
 from flask_basicauth import BasicAuth
-from uuid import UUID, uuid4
+import uuid
 
 
 class MtAuth(BasicAuth):
@@ -28,7 +28,7 @@ class MtAuth(BasicAuth):
 SERVER_1 = 'server_1.db'
 SERVER_2 = 'server_2.db'
 SERVER_3 = 'server_3.db'
-USERNAME_SERVER = 'username_server'
+USERNAME_SERVER = 'username_server.db'
 PER_PAGE = 30
 DEBUG = True
 SECRET_KEY = b'_5#y2L"F4Q8z\n\xec]/'
@@ -62,8 +62,8 @@ def close_databases(db_array):
 def init_db():
     """Initializes the database."""
     db_array = get_db()
-    sqlite3.register_converter('GUID', lambda b: UUID(bytes_le=b))
-    sqlite3.register_adapter(UUID, lambda u: buffer(u.bytes_le))
+    sqlite3.register_converter('GUID', lambda b: uuid.UUID(bytes_le=b))
+    sqlite3.register_adapter(uuid.UUID, lambda u: buffer(u.bytes_le))
     for i in range(0, 3):
         db = db_array[i]
         with app.open_resource('schema.sql', mode='r') as f:
@@ -134,32 +134,47 @@ def follower_inserts(db_array):
 
 
 def insert_user(db_array, username, email, pw):
-    user_id = uuid4()
+    user_id = uuid.uuid4()
     shard_server = int(user_id) % 3
-    user_id_db = get_username_db()
-    user_id_db.execute('''INSERT INTO id (user_id, username) 
-      VALUES (?, "''' + username + '''")''', (user_id, ))
-    db_array[shard_server].execute('''INSERT INTO user (user_id, username, email, pw_hash)
+    data = (user_id, )
+
+    username_db = get_username_db()
+    username_cursor = username_db.cursor()
+    username_cursor.execute('''INSERT INTO id (user_id, username) 
+      VALUES (?, "''' + username + '''")''', data)
+
+    db = db_array[shard_server]
+    db_cursor = db.cursor()
+    db_cursor.execute('''INSERT INTO user (user_id, username, email, pw_hash)
       VALUES (?, "''' + username + ''''", "''' + email + '''", "''' +
-        str(generate_password_hash(pw)) + '''")''', (user_id, ))
-    user_id_db.commit()
-    user_id_db.close()
+        str(generate_password_hash(pw)) + '''")''', data)
+
+    username_db.commit()
+    username_db.close()
 
 
 def populate_message(db_array, username, text, pub_date):
     user_id = get_user_id(username)
-    message_id = uuid4()
+    message_id = uuid.uuid4()
     shard_server = int(user_id) % 3
-    db_array[shard_server].execute('''INSERT INTO message (author_id, message_id, text, pub_date)
-      VALUES(?, ?, "''' + text + '''", "''' + str(pub_date) + '''")''', (user_id, message_id))
+    data = (user_id, message_id)
+
+    db = db_array[shard_server]
+    cursor = db.cursor()
+    cursor.execute('''INSERT INTO message (author_id, message_id, text, pub_date)
+      VALUES(?, ?, "''' + text + '''", "''' + str(pub_date) + '''")''', data)
 
 
 def insert_followers(db_array, username, follower):
     user_id = get_user_id(username)
     follower_id = get_user_id(follower)
     shard_server = int(user_id) % 3
-    db_array[shard_server].execute('''INSERT INTO follower (who_id, whom_id) 
-      VALUES (?, ?)''', (user_id, follower_id))
+
+    data = (user_id, follower_id)
+    db = db_array[shard_server]
+    cursor = db.cursor()
+    cursor.execute('''INSERT INTO follower (who_id, whom_id) 
+      VALUES (?, ?)''', data)
 
 
 @app.cli.command('popdb')
@@ -180,17 +195,18 @@ def restartdb_command():
 def get_user_id(username):
     """Convenience method to look up the id for a username."""
     db = get_username_db()
-    db_array = get_db()
-    result = db.execute('''SELECT user_id FROM id WHERE username="''' + username + '''";''')
-    user_id = result.fetchone()[0]
+    cursor = db.cursor()
+    cursor.execute('''SELECT user_id FROM id WHERE username="''' + username + '''";''')
+    user_id = cursor.fetchone()[0]
     return user_id
 
 
 def get_username(user_id):
     """Convenience method to look up the id for a username."""
     db = get_username_db()
-    result = db.execute('''SELECT username FROM id WHERE user_id=?''', (user_id,))
-    username = result.fetchone()[0]
+    cursor = db.cursor()
+    cursor.execute('''SELECT username FROM id WHERE user_id=?''', (user_id,))
+    username = cursor.fetchone()[0]
     return username
 
 
@@ -266,6 +282,7 @@ def users_timeline(username):
     user_id = get_user_id(username)
     messages = []
     shard_server = int(user_id) % 3
+    asdf
     email_query = db_array[shard_server].execute('''SELECT * FROM user WHERE user_id =''' + str(user_id))
     # if request.method != 'GET':
     #     return jsonify({'status code' : '405'})
